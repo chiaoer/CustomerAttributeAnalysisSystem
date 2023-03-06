@@ -10,6 +10,8 @@ import androidx.annotation.OptIn;
 import androidx.camera.core.ExperimentalGetImage;
 import androidx.camera.core.ImageProxy;
 
+import com.example.mlseriesdemonstrator.FaceExtension;
+import com.example.mlseriesdemonstrator.GA;
 import com.example.mlseriesdemonstrator.helpers.vision.FaceGraphic;
 import com.example.mlseriesdemonstrator.helpers.vision.GraphicOverlay;
 import com.example.mlseriesdemonstrator.helpers.vision.VisionBaseProcessor;
@@ -30,13 +32,13 @@ import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.support.image.ops.ResizeOp;
 
 import java.nio.ByteBuffer;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 
 public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>> {
 
     public interface AgeGenderCallback {
-        void onFaceDetected(Face face, int age, int gender);
+        void onFaceDetected(FaceExtension face, int age, int gender);
     }
 
     private static final String TAG = "AgeGenderEstimationProcessor";
@@ -57,8 +59,10 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
 
     public VisitorAnalysisActivity activity;
 
-    HashMap<Integer, Integer> faceIdAgeMap = new HashMap<>();
-    HashMap<Integer, Integer> faceIdGenderMap = new HashMap<>();
+//    HashMap<Integer, Integer> faceIdAgeMap = new HashMap<>();
+//    HashMap<Integer, Integer> faceIdGenderMap = new HashMap<>();
+
+    private ArrayList<FaceExtension> mTrackedFace;
 
     public AgeGenderEstimationProcessor(Interpreter ageModelInterpreter,
                                         Interpreter genderModelInterpreter,
@@ -111,62 +115,105 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                 @Override
                 public void onSuccess(List<Face> faces) {
                     graphicOverlay.clear();
+                    if (faces.size() > 0)
+                        Log.d(TAG, "## faces size: " + faces.size());
+
+                    ArrayList<FaceExtension> newFaceList = new ArrayList<>();
+
                     for (Face face : faces) {
-                        FaceGraphic faceGraphic = new FaceGraphic(graphicOverlay, face, false, width, height);
                         Log.d(TAG, "face found, id: " + face.getTrackingId());
-//                            if (activity != null) {
-//                                activity.setTestImage(cropToBBox(bitmap, face.getBoundingBox(), rotation));
-//                            }
-                        // now we have a face, so we can use that to analyse age and gender
-                        Bitmap faceBitmap = cropToBBox(bitmap, face.getBoundingBox(), rotation);
 
-                        if (faceBitmap == null) {
-                            Log.d("GraphicOverlay", "Face bitmap null");
-                            return;
+                        //Copy the detected face to faceExtItem
+                        FaceExtension faceExtItem = new FaceExtension();
+                        faceExtItem.faceOri = face;
+
+                        int trackId = face.getTrackingId();
+                        boolean is_found = false;
+
+                        if (mTrackedFace != null) {
+                            Log.d(TAG, "mTrackedFace...size : " + mTrackedFace.size());
+
+                            for (FaceExtension faceExt : mTrackedFace) {
+                                if (faceExt.faceOri.getTrackingId() == trackId) {
+                                    // faceExt.setIsExisted(true);
+                                    faceExtItem.valid_count = faceExt.valid_count;
+                                    faceExtItem.startTime = faceExt.startTime;
+
+                                    faceExtItem.ga_result = faceExt.ga_result;
+                                    faceExtItem.count = faceExt.count + 1;
+                                    if (faceExtItem.count == 2) {
+                                        faceExtItem.valid_count = faceExt.valid_count + 1;
+                                        faceExtItem.count = 0; //reset
+                                    }
+                                    Log.d(TAG, "Face Keep Stay...count = " + faceExtItem.count + ", id = " + faceExtItem.faceOri.getTrackingId() + ", valid_count = " + faceExtItem.valid_count);
+
+                                    if (faceExtItem.valid_count >= 1) {
+                                        Log.d(TAG, "# valid_count >=1");
+
+                                        //Show graphicOverlay
+                                        FaceGraphic faceGraphic = new FaceGraphic(graphicOverlay, face, false, width, height);
+                                        faceGraphic.age = (int) faceExtItem.ga_result.age;
+                                        faceGraphic.gender = faceExtItem.ga_result.gender;
+                                        graphicOverlay.add(faceGraphic);
+
+                                        if (callback != null) {
+                                            callback.onFaceDetected(faceExtItem, (int) faceExtItem.ga_result.age, faceExtItem.ga_result.gender);
+                                        }
+                                    }
+
+                                    newFaceList.add(faceExtItem);
+                                    is_found = true;
+                                    break;
+                                }
+                            }
                         }
 
-                        // We skip further analysis if we have already analysed the face (it may reduce accuracy)
-                        if (faceIdAgeMap.containsKey(face.getTrackingId())) {
-                            faceGraphic.age = faceIdAgeMap.get(face.getTrackingId());
-                            faceGraphic.gender = faceIdGenderMap.get(face.getTrackingId());
-                            graphicOverlay.add(faceGraphic);
-                            return;
-                        }
+                        // New Face
+                        if (!is_found) {
+                            faceExtItem.startTime = System.currentTimeMillis();
+                            Log.d(TAG, "# New Face startTime = " + faceExtItem.startTime);
 
-                        TensorImage tensorImage = TensorImage.fromBitmap(faceBitmap);
-                        ByteBuffer ageImageByteBuffer = ageImageProcessor.process(tensorImage).getBuffer();
-                        float[][] ageOutputArray = new float[1][1];
-                        ageModelInterpreter.run(ageImageByteBuffer, ageOutputArray);
+                            // now we have a face, so we can use that to analyse age and gender
+                            Bitmap faceBitmap = cropToBBox(bitmap, face.getBoundingBox(), rotation);
 
-                        // The model returns a normalized value for the age i.e in range ( 0 , 1 ].
-                        // To get the age, we multiply the model's output with p.
-                        float age = ageOutputArray[0][0] * 116;
-                        Log.d(TAG, "face id: " + face.getTrackingId() + ", age: " + age);
+                            if (faceBitmap == null) {
+                                Log.d("GraphicOverlay", "Face bitmap null");
+                                return;
+                            }
 
-                        ByteBuffer genderImageByteBuffer = genderImageProcessor.process(tensorImage).getBuffer();
-                        float[][] genderOutputArray = new float[1][2];
-                        genderModelInterpreter.run(genderImageByteBuffer, genderOutputArray);
-                        int gender;
-                        if (genderOutputArray[0][0] > genderOutputArray[0][1]) {
-                            // "Male"
-                            gender = 0;
-                        } else {
-                            // "Female"
-                            gender = 1;
-                        }
-                        Log.d(TAG, "face id: " + face.getTrackingId() + ", gender: " + (gender == 0 ? "Male" : "Female"));
+                            TensorImage tensorImage = TensorImage.fromBitmap(faceBitmap);
+                            ByteBuffer ageImageByteBuffer = ageImageProcessor.process(tensorImage).getBuffer();
+                            float[][] ageOutputArray = new float[1][1];
+                            ageModelInterpreter.run(ageImageByteBuffer, ageOutputArray);
 
-                        faceBitmap.recycle();
-                        faceIdAgeMap.put(face.getTrackingId(), (int) age);
-                        faceIdGenderMap.put(face.getTrackingId(), gender);
-                        faceGraphic.age = (int) age;
-                        faceGraphic.gender = gender;
-                        graphicOverlay.add(faceGraphic);
+                            // The model returns a normalized value for the age i.e in range ( 0 , 1 ].
+                            // To get the age, we multiply the model's output with p.
+                            float age = ageOutputArray[0][0] * 116;
+                            Log.d(TAG, "face id: " + face.getTrackingId() + ", age: " + age);
 
-                        if (callback != null) {
-                            callback.onFaceDetected(face, (int) age, gender);
+                            ByteBuffer genderImageByteBuffer = genderImageProcessor.process(tensorImage).getBuffer();
+                            float[][] genderOutputArray = new float[1][2];
+                            genderModelInterpreter.run(genderImageByteBuffer, genderOutputArray);
+                            int gender;
+                            if (genderOutputArray[0][0] > genderOutputArray[0][1]) {
+                                // "Male"
+                                gender = 0;
+                            } else {
+                                // "Female"
+                                gender = 1;
+                            }
+                            Log.d(TAG, "face id: " + face.getTrackingId() + ", gender: " + (gender == 0 ? "Male" : "Female"));
+
+                            faceBitmap.recycle();
+
+                            faceExtItem.ga_result = new GA();
+                            faceExtItem.ga_result.age = age;
+                            faceExtItem.ga_result.gender = gender;
+                            newFaceList.add(faceExtItem);
                         }
                     }
+
+                    mTrackedFace = newFaceList;
                 }
             })
             .addOnFailureListener(new OnFailureListener() {

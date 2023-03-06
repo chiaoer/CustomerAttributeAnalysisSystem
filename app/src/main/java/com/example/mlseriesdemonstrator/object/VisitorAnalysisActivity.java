@@ -2,13 +2,14 @@ package com.example.mlseriesdemonstrator.object;
 
 import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.ImageView;
 
+import com.example.mlseriesdemonstrator.FaceExtension;
 import com.example.mlseriesdemonstrator.R;
 import com.example.mlseriesdemonstrator.helpers.MLVideoHelperActivity;
 import com.example.mlseriesdemonstrator.helpers.vision.VisionBaseProcessor;
 import com.example.mlseriesdemonstrator.helpers.vision.agegenderestimation.AgeGenderEstimationProcessor;
-import com.google.mlkit.vision.face.Face;
 
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.support.common.FileUtil;
@@ -32,6 +33,7 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     private int agedCount;
 
     private Set<Integer> faceTrackingIdSet = new HashSet<>();
+    private static final String TAG = "VisitorAnalysisActivity";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -65,11 +67,13 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     }
 
     @Override
-    public void onFaceDetected(Face face, int age, int gender) {
-        if (!faceTrackingIdSet.contains(face.getTrackingId())) {
+    public void onFaceDetected(FaceExtension face, int age, int gender) {
+        Log.d(TAG, "## onFaceDetected()...faceTrackingIdSet size = " + faceTrackingIdSet.size() + ", facesCount = " + facesCount);
+
+        if (!faceTrackingIdSet.contains(face.faceOri.getTrackingId())) {
             facesCount++;
 
-            if (face.getSmilingProbability() != null && face.getSmilingProbability() > .79f) {
+            if (face.faceOri.getSmilingProbability() != null && face.faceOri.getSmilingProbability() > .79f) {
                 smilingCount++;
             }
 
@@ -96,6 +100,8 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
                     .append("Adults: ").append(adultCount).append(", Aged: ").append(agedCount);
 
             setOutputText(builder.toString());
+
+            faceTrackingIdSet.add(face.faceOri.getTrackingId());//Fix original bug to add new faces
         }
     }
 }
