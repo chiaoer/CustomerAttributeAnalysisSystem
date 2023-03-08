@@ -10,6 +10,7 @@ android {
         applicationId "com.example.mlseriesdemonstrator"
         minSdkVersion 23
         targetSdkVersion 31
+        multiDexEnabled true
         versionCode 1
         versionName "1.0"
 
@@ -78,4 +79,15 @@ dependencies {
     testImplementation 'junit:junit:4.+'
     androidTestImplementation 'androidx.test.ext:junit:1.1.2'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.3.0'
+
+    //Added for azure iot connection.
+    implementation 'com.android.support:multidex:1.0.3'
+    api 'com.microsoft.azure.sdk.iot.provisioning:provisioning-device-client:1.8.7'
+    api ('com.microsoft.azure.sdk.iot:iot-device-client:1.29.4') {
+        exclude module: 'slf4j-api'
+        exclude module:'azure-storage'
+    }
+    implementation 'org.slf4j:slf4j-android:1.7.30'
+    implementation 'com.microsoft.azure.android:azure-storage-android:2.0.0'
+    implementation 'org.apache.commons:commons-lang3:3.12.0'
 }
