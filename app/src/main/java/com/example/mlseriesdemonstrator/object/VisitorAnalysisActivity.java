@@ -6,6 +6,7 @@ import android.util.Log;
 import android.widget.ImageView;
 
 import com.example.mlseriesdemonstrator.FaceExtension;
+import com.example.mlseriesdemonstrator.PnpConvention;
 import com.example.mlseriesdemonstrator.R;
 import com.example.mlseriesdemonstrator.helpers.MLVideoHelperActivity;
 import com.example.mlseriesdemonstrator.helpers.vision.VisionBaseProcessor;
@@ -13,6 +14,8 @@ import com.example.mlseriesdemonstrator.helpers.vision.agegenderestimation.AgeGe
 import com.microsoft.azure.sdk.iot.device.ClientOptions;
 import com.microsoft.azure.sdk.iot.device.DeviceClient;
 import com.microsoft.azure.sdk.iot.device.IotHubClientProtocol;
+import com.microsoft.azure.sdk.iot.device.IotHubEventCallback;
+import com.microsoft.azure.sdk.iot.device.IotHubStatusCode;
 import com.microsoft.azure.sdk.iot.provisioning.device.AdditionalData;
 import com.microsoft.azure.sdk.iot.provisioning.device.ProvisioningDeviceClient;
 import com.microsoft.azure.sdk.iot.provisioning.device.ProvisioningDeviceClientRegistrationCallback;
@@ -28,7 +31,9 @@ import org.tensorflow.lite.support.common.FileUtil;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 public class VisitorAnalysisActivity extends MLVideoHelperActivity implements AgeGenderEstimationProcessor.AgeGenderCallback {
@@ -114,6 +119,8 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     public void onFaceDetected(FaceExtension face, int age, int gender) {
         Log.d(TAG, "## onFaceDetected()...faceTrackingIdSet size = " + faceTrackingIdSet.size() + ", facesCount = " + facesCount);
 
+        String componentName = "FaceAttributeDetect";
+
         if (!faceTrackingIdSet.contains(face.faceOri.getTrackingId())) {
             facesCount++;
 
@@ -146,6 +153,18 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
             setOutputText(builder.toString());
 
             faceTrackingIdSet.add(face.faceOri.getTrackingId());//Fix original bug to add new faces
+
+            /*************************** Send msg to Azure **************************/
+            componentName = "FaceAttributeDetect";
+
+            Map<String, Object> faceAttribute = new HashMap<>();
+            faceAttribute.put("people_count",facesCount);
+            faceAttribute.put("age",face.ga_result.age);
+            faceAttribute.put("gender",face.ga_result.gender);
+
+            Log.d(TAG, "## Send msg to Azure...faceAttribute = " + faceAttribute);
+            com.microsoft.azure.sdk.iot.device.Message message = PnpConvention.createIotHubMessageUtf8(faceAttribute, componentName);
+            deviceClient.sendEventAsync(message, new MessageIotHubEventCallback(), message);
         }
     }
 
@@ -294,6 +313,17 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
             {
                 Log.d(TAG, "Received unknown context");
             }
+        }
+    }
+    /**
+     * The callback to be invoked when a telemetry response is received from IoT Hub.
+     */
+    private static class MessageIotHubEventCallback implements IotHubEventCallback {
+
+        @Override
+        public void execute(IotHubStatusCode responseStatus, Object callbackContext) {
+            com.microsoft.azure.sdk.iot.device.Message msg = (com.microsoft.azure.sdk.iot.device.Message) callbackContext;
+            Log.d(TAG, "Telemetry - Response from IoT Hub: message Id={}, status={}" + msg.getMessageId() + "," + responseStatus.name());
         }
     }
 }
