@@ -79,6 +79,8 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     private Set<Integer> faceTrackingIdSet = new HashSet<>();
     private static final String TAG = "VisitorAnalysisActivity";
 
+    Thread initTask;
+
     /************ Azure IoT Connection Parameters ***********/
     private static final String deviceConnectionString = System.getenv("IOTHUB_DEVICE_CONNECTION_STRING");
     private static final String deviceSecurityType = "DPS";
@@ -123,7 +125,8 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
         readPropertyValue();
 
         //Initialize device client instance.
-        new Thread(new Runnable() {
+        initTask = new Thread(new Runnable() {
+            @Override
             public void run() {
                 // TODO Auto-generated method stub
                 // 您要在執行緒作的事
@@ -134,10 +137,47 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
                     Log.d(TAG, "Exception while opening IoTHub connection: " + e2.toString());
                 }
                 updateReportedProperties();
-            }
-        }).start();
-    }
 
+                while(!initTask.isInterrupted()){  // 判断線程是否被打断
+                    try {
+                        //Send device information to Azure.
+                        Log.d(TAG, "# Send device telemetry to Azure...cpuClock: " + cpuClock + ", memFree: " + memFree + ", memUsage: " + memUsage);
+
+                        String componentName = "AndroidDeviceInfo1";
+
+                        Map<String, Object> deviceInfo = new HashMap<>();
+                        deviceInfo.put("currentTempGPU",currentTempGPU);
+                        deviceInfo.put("cpuClock",cpuClock);
+                        deviceInfo.put("memFree",memFree);
+                        deviceInfo.put("memUsage",memUsage);
+                        deviceInfo.put("logicalDISKfree",logicalDISKfree);
+                        deviceInfo.put("logicalDISKusage",logicalDISKusage);
+                        deviceInfo.put("currentTemp",currentTemp);
+
+                        Log.d(TAG, "## deviceInfo = " + deviceInfo);
+                        com.microsoft.azure.sdk.iot.device.Message message = PnpConvention.createIotHubMessageUtf8(deviceInfo, componentName);
+                        deviceClient.sendEventAsync(message, new MessageIotHubEventCallback(), message);
+                        Thread.sleep(6000);
+
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                        Log.i(TAG,Thread.currentThread().getName()+"異常抛出，停止线程");
+                        break;// 抛出異常跳出循环
+                    }
+                }
+            }
+        });
+        initTask.start();
+    }
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        if(null != initTask && initTask.isAlive()){
+            initTask.interrupt();
+            initTask = null;
+        }
+    }
     @Override
     protected VisionBaseProcessor setProcessor() {
         try {
@@ -204,8 +244,6 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
             faceTrackingIdSet.add(face.faceOri.getTrackingId());//Fix original bug to add new faces
 
             /*************************** Send msg to Azure **************************/
-            componentName = "FaceAttributeDetect";
-
             Map<String, Object> faceAttribute = new HashMap<>();
             faceAttribute.put("people_count",facesCount);
             faceAttribute.put("age",face.ga_result.age);
