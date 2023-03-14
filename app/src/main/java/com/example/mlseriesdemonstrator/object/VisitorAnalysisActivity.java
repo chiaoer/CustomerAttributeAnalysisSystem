@@ -1,7 +1,12 @@
 package com.example.mlseriesdemonstrator.object;
 
+import android.app.ActivityManager;
 import android.graphics.Bitmap;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.StatFs;
+import android.provider.Settings;
 import android.util.Log;
 import android.widget.ImageView;
 
@@ -13,6 +18,8 @@ import com.example.mlseriesdemonstrator.helpers.vision.VisionBaseProcessor;
 import com.example.mlseriesdemonstrator.helpers.vision.agegenderestimation.AgeGenderEstimationProcessor;
 import com.microsoft.azure.sdk.iot.device.ClientOptions;
 import com.microsoft.azure.sdk.iot.device.DeviceClient;
+import com.microsoft.azure.sdk.iot.device.DeviceTwin.Property;
+import com.microsoft.azure.sdk.iot.device.DeviceTwin.TwinPropertyCallBack;
 import com.microsoft.azure.sdk.iot.device.IotHubClientProtocol;
 import com.microsoft.azure.sdk.iot.device.IotHubEventCallback;
 import com.microsoft.azure.sdk.iot.device.IotHubStatusCode;
@@ -28,13 +35,32 @@ import com.microsoft.azure.sdk.iot.provisioning.security.SecurityProviderSymmetr
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.support.common.FileUtil;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import lombok.NonNull;
 
 public class VisitorAnalysisActivity extends MLVideoHelperActivity implements AgeGenderEstimationProcessor.AgeGenderCallback {
 
@@ -65,15 +91,36 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     // Plug and play features are available over MQTT, MQTT_WS, AMQPS, and AMQPS_WS.
     private static final ProvisioningDeviceClientTransportProtocol provisioningProtocol = ProvisioningDeviceClientTransportProtocol.MQTT;
     private static final IotHubClientProtocol protocol = IotHubClientProtocol.MQTT;
-
     private static final int MAX_TIME_TO_WAIT_FOR_REGISTRATION = 1000; // in milli seconds
-
     private static DeviceClient deviceClient;
 
+    //Device information parameters
+    private String hostname;
+    private String cpuInfo;
+    private long cpuCores;
+    private long cpuMaxfreq;
+    private String baseboardManufacturer;
+    private String baseboardSerialNumber;
+    private String osVersion;
+    private String osBuildNumber;
+    private long memTotal;
+    private long logicalDISKtotal;
+    private String ipLocal;
+    private String ipPublic;
+    private double highTemp;
+    private double currentTempGPU;
+    private double cpuClock;
+    private long memFree;
+    private long memUsage;
+    private long logicalDISKfree;
+    private long logicalDISKusage;
+    private double currentTemp;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        readPropertyValue();
 
         //Initialize device client instance.
         new Thread(new Runnable() {
@@ -85,7 +132,9 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
                 } catch (Exception e2)
                 {
                     Log.d(TAG, "Exception while opening IoTHub connection: " + e2.toString());
-                }            }
+                }
+                updateReportedProperties();
+            }
         }).start();
     }
 
@@ -326,4 +375,309 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
             Log.d(TAG, "Telemetry - Response from IoT Hub: message Id={}, status={}" + msg.getMessageId() + "," + responseStatus.name());
         }
     }
+    /********************* Send AndroidDeviceInfo1 information to the cloud. ********************/
+    /**
+     * The callback to be invoked in response to device twin operations in IoT Hub.
+     */
+    private static class TwinIotHubEventCallback implements IotHubEventCallback {
+
+        @Override
+        public void execute(IotHubStatusCode responseStatus, Object callbackContext) {
+            Log.d(TAG,"Property - Response from IoT Hub: {}" + responseStatus.name());
+        }
+    }
+
+    /**
+     * The callback to be invoked for a property change that is not explicitly monitored by the device.
+     */
+    private static class GenericPropertyUpdateCallback implements TwinPropertyCallBack {
+
+        @Override
+        public void TwinPropertyCallBack(Property property, Object context) {
+            Log.d(TAG, "Property - Received property unhandled by device, key={}, value={}" + property.getKey() + ", " + property.getValue());
+        }
+    }
+    private void readPropertyValue() {
+        hostname = getHostname();
+        cpuInfo = getCPUInfo();
+        cpuCores = getNumberOfCores();
+        cpuMaxfreq = getCPUMaxFreq();
+        baseboardManufacturer = getManufacturer();
+        baseboardSerialNumber = getModel();
+        osVersion = getAndroidVersion();
+        osBuildNumber = getAndroidBuildNumber();
+        memTotal = getMEMTotal();
+        logicalDISKtotal = getTotalDiskSpace();
+        ipLocal = getLocalIpAddress();
+        ipPublic = getPublicIPAddress();
+        highTemp = getCpuTemp();
+        currentTempGPU = getGpuTemp();
+        cpuClock = getCPUFreq();
+        memFree = getMEMavail();
+        memUsage = getMEMusage();
+        logicalDISKfree = freeDISK();
+        logicalDISKusage = busyDISK();
+        currentTemp = getCpuTemp();
+
+        Log.d(TAG,"/*********** Properties dump ************/");
+        Log.d(TAG,"hostname = " + hostname);
+        Log.d(TAG,"cpuInfo = " + cpuInfo);
+        Log.d(TAG,"cpuCores = " + cpuCores);
+        Log.d(TAG,"cpuMaxfreq = " + cpuMaxfreq + "GHz");
+        Log.d(TAG,"baseboardManufacturer = " + baseboardManufacturer);
+        Log.d(TAG,"baseboardSerialNumber = " + baseboardSerialNumber);
+        Log.d(TAG,"osVersion = " + osVersion);
+        Log.d(TAG,"osBuildNumber = " + osBuildNumber);
+        Log.d(TAG,"memTotal = " + memTotal + "MB");
+        Log.d(TAG,"logicalDISKtotal = " + logicalDISKtotal + "MB");
+        Log.d(TAG,"ipLocal = " + ipLocal);
+        Log.d(TAG,"ipPublic = " + ipPublic);
+        Log.d(TAG,"highTemp = " + highTemp);
+        Log.d(TAG,"currentTempGPU = " + currentTempGPU);
+        Log.d(TAG,"cpuClock = " + cpuClock);
+        Log.d(TAG,"memFree = " + memFree + "MB");
+        Log.d(TAG,"memUsage = " + memUsage + "MB");
+        Log.d(TAG,"logicalDISKfree = " + logicalDISKfree + "MB");
+        Log.d(TAG,"logicalDISKusage = " + logicalDISKusage + "MB");
+        Log.d(TAG,"currentTemp = " + currentTemp);
+    }
+    private void updateReportedProperties() {
+        String componentName = "AndroidDeviceInfo1";
+
+        Set<Property> reportProperties = PnpConvention.createComponentPropertyPatch(componentName, new HashMap<String, Object>()
+        {{
+            put("hostname", hostname);
+            put("cpuInfo", cpuInfo);
+            put("cpuCores", cpuCores);
+            put("cpuMaxfreq", cpuMaxfreq);
+            put("baseboardManufacturer", baseboardManufacturer);
+            put("baseboardSerialNumber", baseboardSerialNumber);
+            put("osVersion", osVersion);
+            put("osBuildNumber", osBuildNumber);
+            put("memTotal", memTotal);
+            put("logicalDISKtotal", logicalDISKtotal);
+            put("ipLocal", ipLocal);
+            put("ipPublic", ipPublic);
+            put("highTemp", highTemp);
+        }});
+
+        try {
+            deviceClient.startDeviceTwin(new TwinIotHubEventCallback(), null, new GenericPropertyUpdateCallback(), null);
+            deviceClient.sendReportedProperties(reportProperties);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        Log.d(TAG,"updateReportedProperties()....sendReportedProperties");
+    }
+    private String getHostname() {
+        return Settings.Global.getString(getApplicationContext().getContentResolver(), Settings.Global.DEVICE_NAME);
+    }
+
+    private String getManufacturer() {
+        return Build.MANUFACTURER;
+    }
+
+    private String getModel() {
+        return Build.MODEL;
+    }
+
+    @NonNull
+    private String getAndroidVersion() {
+        return "android" + Build.VERSION.RELEASE;
+    }
+
+    @NonNull
+    private String getAndroidBuildNumber() {
+        return Integer.toString(Build.VERSION.SDK_INT);
+    }
+
+    private String getCPUInfo() {
+        String str, output = "Unavailable";
+        BufferedReader br;
+
+        try {
+            br = new BufferedReader(new FileReader("/proc/cpuinfo"));
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+            return "Unavailable";
+        }
+
+        try{
+            while((str = br.readLine()) != null) {
+                String[] data = str.split(":");
+                if (data.length > 1) {
+                    String key = data[0].trim().replace(" ", "_");
+                    if (key.equals("Hardware") || key.equals("model_name")) {
+                        output = data[1].trim();
+                    }
+                }
+            }
+            br.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return output;
+    }
+    private long getNumberOfCores() {
+        return Runtime.getRuntime().availableProcessors();
+    }
+
+    private long getCPUMaxFreq() {
+        BufferedReader reader;
+
+        try {
+            reader = new BufferedReader(new FileReader("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"));
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+            return 0;
+        }
+
+        try {
+            String cpuMaxFreq = reader.readLine();
+            reader.close();
+            return Long.parseLong(cpuMaxFreq) / 1000000L;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    private long getMEMTotal() {
+        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+        ActivityManager activityManager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        activityManager.getMemoryInfo(mi);
+
+        return mi.totalMem / 0x100000L;
+    }
+
+    private long getTotalDiskSpace() {
+        StatFs statFs = new StatFs(Environment.getRootDirectory().getAbsolutePath());
+        long rootDiskSpace = statFs.getBlockCountLong() * statFs.getBlockSizeLong();
+        statFs = new StatFs(Environment.getDataDirectory().getAbsolutePath());
+        long dataDiskSpace = statFs.getBlockCountLong() * statFs.getBlockSizeLong();
+
+        return (rootDiskSpace + dataDiskSpace) / 0x100000L;
+    }
+    private String getLocalIpAddress() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements();) {
+                NetworkInterface intf = en.nextElement();
+                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements();) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
+                        return inetAddress.getHostAddress();
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            e.printStackTrace();
+            return "Unavailable";
+        }
+
+        return "Unavailable";
+    }
+
+    private String getPublicIPAddress() {
+        ExecutorService es = Executors.newSingleThreadExecutor();
+        Future<String> result = es.submit(new Callable<String>() {
+            public String call() throws Exception {
+                try {
+                    URL url = new URL("http://whatismyip.akamai.com/");
+                    HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
+                    try {
+                        InputStream in = new BufferedInputStream(urlConnection.getInputStream());
+                        BufferedReader r = new BufferedReader(new InputStreamReader(in));
+                        StringBuilder total = new StringBuilder();
+                        String line;
+                        while ((line = r.readLine()) != null) {
+                            total.append(line).append('\n');
+                        }
+                        urlConnection.disconnect();
+                        return total.toString();
+                    }finally {
+                        urlConnection.disconnect();
+                    }
+                }catch (IOException e){
+                    Log.e("Public IP: ",e.getMessage());
+                }
+                return "Unavailable";
+            }
+        });
+
+        try {
+            return result.get();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Unavailable";
+        }
+    }
+
+    private double getCpuTemp() {
+        try {
+            BufferedReader reader = new BufferedReader(new FileReader("/sys/devices/virtual/thermal/thermal_zone0/temp"));
+            String cputemp = reader.readLine();
+            reader.close();
+            return Double.parseDouble(cputemp) / 1000;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    private double getGpuTemp() {
+        try {
+            BufferedReader reader = new BufferedReader(new FileReader("/sys/class/thermal/thermal_zone10/temp"));
+            String gputemp = reader.readLine();
+            reader.close();
+            return Double.parseDouble(gputemp) / 1000;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    private double getCPUFreq() {
+        BufferedReader reader;
+
+        try {
+            reader = new BufferedReader(new FileReader("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"));
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+            return 0;
+        }
+
+        try {
+            String cpuFreq = reader.readLine();
+            reader.close();
+            return Double.parseDouble(cpuFreq) / 1000000;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+    private long getMEMavail() {
+        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+        ActivityManager activityManager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        activityManager.getMemoryInfo(mi);
+
+        return mi.availMem / 0x100000L;
+    }
+    private long getMEMusage() {
+        return getMEMTotal() - getMEMavail();
+    }
+    private long freeDISK()
+    {
+        StatFs statFs = new StatFs(Environment.getRootDirectory().getAbsolutePath());
+        long freeRoot = (statFs.getAvailableBlocksLong() * statFs.getBlockSizeLong());
+        statFs = new StatFs(Environment.getDataDirectory().getAbsolutePath());
+        long freeData = statFs.getAvailableBlocksLong() * statFs.getBlockSizeLong();
+
+        return (freeRoot + freeData) / 0x100000L;
+    }
+    private long busyDISK()
+    {
+        return getTotalDiskSpace() - freeDISK();
+    }
+
 }
