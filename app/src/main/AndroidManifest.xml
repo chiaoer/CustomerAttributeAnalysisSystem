@@ -17,6 +17,9 @@
             <action android:name="android.intent.action.GET_CONTENT" />
             <data android:mimeType="image/*" />
         </intent>
+        <intent>
+            <action android:name="com.example.multiscreendemo.messenger" />
+        </intent>
     </queries>
 
     <application

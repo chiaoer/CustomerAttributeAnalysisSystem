@@ -1,5 +1,7 @@
 package com.example.mlseriesdemonstrator.helpers.vision.agegenderestimation;
 
+import static com.example.mlseriesdemonstrator.GA.videoType;
+
 import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.graphics.Rect;
@@ -38,7 +40,7 @@ import java.util.List;
 public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>> {
 
     public interface AgeGenderCallback {
-        void onFaceDetected(FaceExtension face, int age, int gender);
+        void onFaceDetected(FaceExtension face, int age, int gender, boolean keep);
     }
 
     private static final String TAG = "AgeGenderEstimationProcessor";
@@ -138,6 +140,7 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                                     // faceExt.setIsExisted(true);
                                     faceExtItem.valid_count = faceExt.valid_count;
                                     faceExtItem.startTime = faceExt.startTime;
+                                    faceExtItem.keepForVideo = faceExt.keepForVideo;
 
                                     faceExtItem.ga_result = faceExt.ga_result;
                                     faceExtItem.count = faceExt.count + 1;
@@ -156,8 +159,20 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                                         faceGraphic.gender = faceExtItem.ga_result.gender;
                                         graphicOverlay.add(faceGraphic);
 
-                                        if (callback != null) {
-                                            callback.onFaceDetected(faceExtItem, (int) faceExtItem.ga_result.age, faceExtItem.ga_result.gender);
+                                        //Calculate
+                                        long timeDiff = System.currentTimeMillis() - faceExtItem.startTime;
+                                        Log.d(TAG, "# timeDiff = " + timeDiff + ", keepForVideo = " + faceExtItem.keepForVideo);
+
+                                        if (timeDiff > 5000 && faceExtItem.keepForVideo == 0) {
+                                            faceExtItem.keepForVideo = 1;
+
+                                            if (callback != null) {
+                                                callback.onFaceDetected(faceExtItem, (int) faceExtItem.ga_result.age, faceExtItem.ga_result.gender, true);
+                                            }
+                                        } else {
+                                            if (callback != null) {
+                                                callback.onFaceDetected(faceExtItem, (int) faceExtItem.ga_result.age, faceExtItem.ga_result.gender, false);
+                                            }
                                         }
                                     }
 
@@ -209,6 +224,22 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                             faceExtItem.ga_result = new GA();
                             faceExtItem.ga_result.age = age;
                             faceExtItem.ga_result.gender = gender;
+
+                            if (age < 13) {
+                                faceExtItem.ga_result.videoType = videoType.Child;
+                            } else if (age < 31) {
+                                faceExtItem.ga_result.videoType = videoType.Young;
+                            } else if (age < 61) {
+                                if (gender == 0)
+                                    faceExtItem.ga_result.videoType = videoType.MaleAdult;
+                                else
+                                    faceExtItem.ga_result.videoType = videoType.FemaleAdult;
+                            } else {
+                                if (gender == 0)
+                                    faceExtItem.ga_result.videoType = videoType.MaleSenior;
+                                else
+                                    faceExtItem.ga_result.videoType = videoType.FemaleSenior;
+                            }
                             newFaceList.add(faceExtItem);
                         }
                     }

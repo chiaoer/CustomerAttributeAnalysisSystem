@@ -1,10 +1,19 @@
 package com.example.mlseriesdemonstrator.object;
 
 import android.app.ActivityManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.RemoteException;
 import android.os.StatFs;
 import android.provider.Settings;
 import android.util.Log;
@@ -78,7 +87,12 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
 
     private Set<Integer> faceTrackingIdSet = new HashSet<>();
     private static final String TAG = "VisitorAnalysisActivity";
-
+    //Messenger for communicating with the service.
+    private Messenger mService = null;
+    //Flag indicating whether we have called bind on the service.
+    private boolean mIsBound = false;
+    //for IPC with MultiScreenDemo App
+    private static final int MSG_FACE = 0x110;
     Thread initTask;
 
     /************ Azure IoT Connection Parameters ***********/
@@ -170,6 +184,18 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
         initTask.start();
     }
     @Override
+    protected void onStart() {
+        Log.d(TAG, "onStart()");
+        super.onStart();
+
+        //檢查點: Bind to the service
+        Intent intent = new Intent();
+        intent.setAction("com.example.multiscreendemo.messenger");
+        intent.setPackage("com.example.multiscreendemo");
+
+        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
+    }
+    @Override
     protected void onPause() {
         super.onPause();
 
@@ -178,6 +204,17 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
             initTask = null;
         }
     }
+
+    @Override
+    protected void onDestroy() {
+        if (mIsBound) {
+            //檢查點(unbind): Detach our existing connection.
+            unbindService(mConnection);
+            mIsBound = false;
+        }
+        super.onDestroy();
+    }
+
     @Override
     protected VisionBaseProcessor setProcessor() {
         try {
@@ -205,7 +242,7 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     }
 
     @Override
-    public void onFaceDetected(FaceExtension face, int age, int gender) {
+    public void onFaceDetected(FaceExtension face, int age, int gender, boolean keep) {
         Log.d(TAG, "## onFaceDetected()...faceTrackingIdSet size = " + faceTrackingIdSet.size() + ", facesCount = " + facesCount);
 
         String componentName = "FaceAttributeDetect";
@@ -252,6 +289,29 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
             Log.d(TAG, "## Send msg to Azure...faceAttribute = " + faceAttribute);
             com.microsoft.azure.sdk.iot.device.Message message = PnpConvention.createIotHubMessageUtf8(faceAttribute, componentName);
             deviceClient.sendEventAsync(message, new MessageIotHubEventCallback(), message);
+        }
+        if (keep) {
+            Log.d(TAG, "# onFaceDetected()..Ready to send message..mIsBound = " + mIsBound + ", videoType = " + face.ga_result.videoType.toString());
+
+            if (!mIsBound) return;
+
+            try {
+                Bundle mBundle = new Bundle();
+                //當人臉偵測時間超過五秒時,告知server目前的 videoType
+                mBundle.putInt("videoType",face.ga_result.videoType.ordinal());
+                Message msg = Message.obtain();
+                msg.what = MSG_FACE;
+                msg.replyTo = mMessenger;
+                msg.obj = mBundle;
+                mService.send(msg);
+
+            } catch (RemoteException e) {
+                // In this case the service has crashed before we could even
+                // do anything with it; we can count on soon being
+                // disconnected (and then reconnected if it can be restarted)
+                // so there is no need to do anything here.
+                e.printStackTrace();
+            }
         }
     }
 
@@ -717,5 +777,49 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     {
         return getTotalDiskSpace() - freeDISK();
     }
+    /**
+     * Target we publish for clients to send messages to IncomingHandler.
+     */
+    final Messenger mMessenger = new Messenger(new IncomingHandler());
+    /**
+     * Class for interacting with the main interface of the service.
+     */
+    private ServiceConnection mConnection = new ServiceConnection() {
+        public void onServiceConnected(ComponentName className, IBinder service) {
+            // This is called when the connection with the service has been
+            // established, giving us the object we can use to
+            // interact with the service.  We are communicating with the
+            // service using a Messenger, so here we get a client-side
+            // representation of that from the raw IBinder object.
+            Log.d(TAG, "onServiceConnected()");
+            mService = new Messenger(service);
+            mIsBound = true;
+        }
 
+        public void onServiceDisconnected(ComponentName className) {
+            Log.d(TAG, "onServiceDisconnected()");
+
+            // This is called when the connection with the service has been
+            // unexpectedly disconnected -- that is, its process crashed.
+            mService = null;
+            mIsBound = false;
+        }
+    };
+    /**
+     * Handler of incoming messages from Server(MultiScreenDemo App).
+     */
+    public static class IncomingHandler extends Handler {
+
+        @Override
+        public void handleMessage(@androidx.annotation.NonNull Message msgfromServer) {
+
+            switch (msgfromServer.what) {
+                case MSG_FACE:
+                    Log.i(TAG, "发送方收到了服务端的回复，回复内容是：" + msgfromServer.getData().getString("reply"));
+                    break;
+                default:
+                    super.handleMessage(msgfromServer);
+            }
+        }
+    }
 }

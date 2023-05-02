@@ -14,15 +14,5 @@ public class FaceExtension {
     public int valid_count = 0;//Determine whether it is a valid face
 
     public long startTime = 0;//For calculating keep time.
-    public long keepTime = 0;
-
-    /********* New Class functions ***********/
-
-//    public void setIsExisted(boolean isExisted) {
-//        this.isExisted = isExisted;
-//    }
-//
-//    public boolean getIsExisted() {
-//        return this.isExisted;
-//    }
+    public int keepForVideo = 0;
 }
