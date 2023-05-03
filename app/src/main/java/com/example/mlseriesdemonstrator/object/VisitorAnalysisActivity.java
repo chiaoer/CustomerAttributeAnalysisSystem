@@ -264,7 +264,7 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
                 agedCount++;
             }
 
-            if (gender == 0) {
+            if (gender == 1) {
                 maleCount++;
             } else {
                 femaleCount++;

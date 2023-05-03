@@ -212,12 +212,12 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                             int gender;
                             if (genderOutputArray[0][0] > genderOutputArray[0][1]) {
                                 // "Male"
-                                gender = 0;
+                                gender = 1;
                             } else {
                                 // "Female"
-                                gender = 1;
+                                gender = 0;
                             }
-                            Log.d(TAG, "face id: " + face.getTrackingId() + ", gender: " + (gender == 0 ? "Male" : "Female"));
+                            Log.d(TAG, "face id: " + face.getTrackingId() + ", gender: " + (gender == 1 ? "Male" : "Female"));
 
                             faceBitmap.recycle();
 
@@ -230,12 +230,12 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                             } else if (age < 31) {
                                 faceExtItem.ga_result.videoType = videoType.Young;
                             } else if (age < 61) {
-                                if (gender == 0)
+                                if (gender == 1)
                                     faceExtItem.ga_result.videoType = videoType.MaleAdult;
                                 else
                                     faceExtItem.ga_result.videoType = videoType.FemaleAdult;
                             } else {
-                                if (gender == 0)
+                                if (gender == 1)
                                     faceExtItem.ga_result.videoType = videoType.MaleSenior;
                                 else
                                     faceExtItem.ga_result.videoType = videoType.FemaleSenior;
