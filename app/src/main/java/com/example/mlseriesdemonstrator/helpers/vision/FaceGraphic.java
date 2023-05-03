@@ -305,7 +305,7 @@ public class FaceGraphic extends GraphicOverlay.Graphic {
     yLabelOffset += lineHeight;
     Log.d("xx", "gender " + gender);
     if (gender != -1) {
-      canvas.drawText("G: " + (gender == 0 ? "Male" : "Female"), left, top + yLabelOffset, idPaints[colorID]);
+      canvas.drawText("G: " + (gender == 1 ? "Male" : "Female"), left, top + yLabelOffset, idPaints[colorID]);
     }
     yLabelOffset += lineHeight;
 
