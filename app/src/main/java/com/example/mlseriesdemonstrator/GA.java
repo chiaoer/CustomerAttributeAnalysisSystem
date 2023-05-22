@@ -5,7 +5,7 @@ import java.io.Serializable;
 public class GA implements Serializable {
 
     public int gender;
-    public float age;
+    public int age;
     public enum videoType {
         Child,
         Young,

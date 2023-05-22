@@ -222,7 +222,7 @@ public class AgeGenderEstimationProcessor extends VisionBaseProcessor<List<Face>
                             faceBitmap.recycle();
 
                             faceExtItem.ga_result = new GA();
-                            faceExtItem.ga_result.age = age;
+                            faceExtItem.ga_result.age = (int)age;
                             faceExtItem.ga_result.gender = gender;
 
                             if (age < 13) {
