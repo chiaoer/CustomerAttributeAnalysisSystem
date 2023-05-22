@@ -109,6 +109,7 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
     private static final IotHubClientProtocol protocol = IotHubClientProtocol.MQTT;
     private static final int MAX_TIME_TO_WAIT_FOR_REGISTRATION = 1000; // in milli seconds
     private static DeviceClient deviceClient;
+    private static boolean isClientOpen = false;
 
     //Device information parameters
     private String hostname;
@@ -246,6 +247,11 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
         Log.d(TAG, "## onFaceDetected()...faceTrackingIdSet size = " + faceTrackingIdSet.size() + ", facesCount = " + facesCount);
 
         String componentName = "FaceAttributeDetect";
+
+        if (!isClientOpen) {
+            Log.d(TAG, "isClientOpen is false..IoT Hub connection hasn't established!!");
+            return;
+        }
 
         if (!faceTrackingIdSet.contains(face.faceOri.getTrackingId())) {
             facesCount++;
@@ -386,6 +392,7 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
 
         try {
             deviceClient.open();
+            isClientOpen = true;
         } catch (Exception e2) {
             Log.e(TAG, "Exception while opening IoTHub connection: " + e2.getMessage());
             deviceClient.closeNow();
@@ -433,6 +440,7 @@ public class VisitorAnalysisActivity extends MLVideoHelperActivity implements Ag
 
                 deviceClient = DeviceClient.createFromSecurityProvider(iotHubUri, deviceId, securityClientSymmetricKey, IotHubClientProtocol.MQTT, options);
                 deviceClient.open();
+                isClientOpen = true;
             }
         } catch (Exception e2) {
             Log.e(TAG, "Exception while opening IoTHub connection: " + e2.getMessage());
